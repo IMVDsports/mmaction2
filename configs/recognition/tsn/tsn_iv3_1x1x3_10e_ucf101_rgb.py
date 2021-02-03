@@ -2,8 +2,8 @@
 model = dict(
     type='Recognizer2D',
     backbone=dict(
-        type='ResNet',
-        pretrained='torchvision://resnet50',
+        type='Inception_v3',
+        pretrained='torchvision://inception_v3',
         depth=50,
         norm_eval=False),
     cls_head=dict(
@@ -72,7 +72,7 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 data = dict(
-    videos_per_gpu=32,
+    videos_per_gpu=16,
     workers_per_gpu=4,
     train=dict(
         type=dataset_type,
@@ -94,12 +94,12 @@ data = dict(
         start_index=0))
 # optimizer
 optimizer = dict(
-    type='SGD', lr=0.00128, momentum=0.9,
-    weight_decay=0.0005)  # this lr is used for 8 gpus
+    type='SGD', lr=0.001, momentum=0.9,
+    weight_decay=0.0005)  # followed paper
 optimizer_config = dict(grad_clip=dict(max_norm=40, norm_type=2))
 # learning policy
 lr_config = dict(policy='step', step=[])
-total_epochs = 75
+total_epochs = 10
 checkpoint_config = dict(interval=5)
 evaluation = dict(
     interval=5, metrics=['top_k_accuracy', 'mean_class_accuracy'])
@@ -112,7 +112,7 @@ log_config = dict(
 # runtime settings
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = f'./work_dirs/tsn_r50_1x1x3_75e_ucf101_split_{split}_rgb/'
+work_dir = f'./work_dirs/tsn_r50_1x1x3_10e_ucf101_split_{split}_rgb/'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
