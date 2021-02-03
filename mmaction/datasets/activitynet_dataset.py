@@ -2,6 +2,7 @@ import copy
 import os
 import os.path as osp
 import warnings
+from collections import OrderedDict
 
 import mmcv
 import numpy as np
@@ -114,7 +115,8 @@ class ActivityNetDataset(BaseDataset):
             ground_truth[video_id] = np.array(this_video_ground_truths)
         return ground_truth
 
-    def proposals2json(self, results, show_progress=False):
+    @staticmethod
+    def proposals2json(results, show_progress=False):
         """Convert all proposals to a final dict(json) format.
 
         Args:
@@ -141,7 +143,8 @@ class ActivityNetDataset(BaseDataset):
                 prog_bar.update()
         return result_dict
 
-    def _import_proposals(self, results):
+    @staticmethod
+    def _import_proposals(results):
         """Read predictions from results."""
         proposals = {}
         num_proposals = 0
@@ -236,7 +239,7 @@ class ActivityNetDataset(BaseDataset):
             if metric not in allowed_metrics:
                 raise KeyError(f'metric {metric} is not supported')
 
-        eval_results = {}
+        eval_results = OrderedDict()
         ground_truth = self._import_ground_truth()
         proposal, num_proposals = self._import_proposals(results)
 

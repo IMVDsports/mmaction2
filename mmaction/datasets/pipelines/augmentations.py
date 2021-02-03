@@ -43,6 +43,223 @@ def _init_lazy_if_proper(results, lazy):
 
 
 @PIPELINES.register_module()
+class Imgaug:
+    """Imgaug augmentation.
+
+    Adds custom transformations from imgaug library.
+    Please visit `https://imgaug.readthedocs.io/en/latest/index.html`
+    to get more information. Two demo configs could be found in tsn and i3d
+    config folder.
+
+    It's better to use uint8 images as inputs since imgaug works best with
+    numpy dtype uint8 and isn't well tested with other dtypes. It should be
+    noted that not all of the augmenters have the same input and output dtype,
+    which may cause unexpected results.
+
+    Required keys are "imgs", "img_shape"(if "gt_bboxes" is not None) and
+    "modality", added or modified keys are "imgs", "img_shape", "gt_bboxes"
+    and "proposals".
+
+    It is worth mentioning that `Imgaug` will NOT create custom keys like
+    "interpolation", "crop_bbox", "flip_direction", etc. So when using
+    `Imgaug` along with other mmaction2 pipelines, we should pay more attention
+    to required keys.
+
+    Two steps to use `Imgaug` pipeline:
+    1. Create initialization parameter `transforms`. There are three ways
+        to create `transforms`.
+        1) string: only support `default` for now.
+            e.g. `transforms='default'`
+        2) list[dict]: create a list of augmenters by a list of dicts, each
+            dict corresponds to one augmenter. Every dict MUST contain a key
+            named `type`. `type` should be a string(iaa.Augmenter's name) or
+            an iaa.Augmenter subclass.
+            e.g. `transforms=[dict(type='Rotate', rotate=(-20, 20))]`
+            e.g. `transforms=[dict(type=iaa.Rotate, rotate=(-20, 20))]`
+        3) iaa.Augmenter: create an imgaug.Augmenter object.
+            e.g. `transforms=iaa.Rotate(rotate=(-20, 20))`
+    2. Add `Imgaug` in dataset pipeline. It is recommended to insert imgaug
+        pipeline before `Normalize`. A demo pipeline is listed as follows.
+        ```
+        pipeline = [
+            dict(
+                type='SampleFrames',
+                clip_len=1,
+                frame_interval=1,
+                num_clips=16,
+            ),
+            dict(type='RawFrameDecode'),
+            dict(type='Resize', scale=(-1, 256)),
+            dict(
+                type='MultiScaleCrop',
+                input_size=224,
+                scales=(1, 0.875, 0.75, 0.66),
+                random_crop=False,
+                max_wh_scale_gap=1,
+                num_fixed_crops=13),
+            dict(type='Resize', scale=(224, 224), keep_ratio=False),
+            dict(type='Flip', flip_ratio=0.5),
+            dict(type='Imgaug', transforms='default'),
+            # dict(type='Imgaug', transforms=[
+            #     dict(type='Rotate', rotate=(-20, 20))
+            # ]),
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='FormatShape', input_format='NCHW'),
+            dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
+            dict(type='ToTensor', keys=['imgs', 'label'])
+        ]
+        ```
+
+    Args:
+        transforms (str | list[dict] | :obj:`iaa.Augmenter`): Three different
+            ways to create imgaug augmenter.
+    """
+
+    def __init__(self, transforms):
+        import imgaug.augmenters as iaa
+
+        if transforms == 'default':
+            self.transforms = self.default_transforms()
+        elif isinstance(transforms, list):
+            assert all(isinstance(trans, dict) for trans in transforms)
+            self.transforms = transforms
+        elif isinstance(transforms, iaa.Augmenter):
+            self.aug = self.transforms = transforms
+        else:
+            raise ValueError('transforms must be `default` or a list of dicts'
+                             ' or iaa.Augmenter object')
+
+        if not isinstance(transforms, iaa.Augmenter):
+            self.aug = iaa.Sequential(
+                [self.imgaug_builder(t) for t in self.transforms])
+
+    def default_transforms(self):
+        """Default transforms for imgaug."""
+
+        return [
+            dict(type='Rotate', rotate=(-30, 30)),
+            dict(
+                type='SomeOf',
+                n=(0, 3),
+                children=[
+                    dict(
+                        type='OneOf',
+                        children=[
+                            dict(type='GaussianBlur', sigma=(0, 0.5)),
+                            dict(type='AverageBlur', k=(2, 7)),
+                            dict(type='MedianBlur', k=(3, 11))
+                        ]),
+                    dict(
+                        type='OneOf',
+                        children=[
+                            dict(
+                                type='Dropout', p=(0.01, 0.1),
+                                per_channel=0.5),
+                            dict(
+                                type='CoarseDropout',
+                                p=(0.03, 0.15),
+                                size_percent=(0.02, 0.05),
+                                per_channel=0.2),
+                        ]),
+                    dict(
+                        type='AdditiveGaussianNoise',
+                        loc=0,
+                        scale=(0.0, 0.05 * 255),
+                        per_channel=0.5),
+                ]),
+        ]
+
+    def imgaug_builder(self, cfg):
+        """Import a module from imgaug.
+
+        It follows the logic of :func:`build_from_cfg`. Use a dict object to
+        create an iaa.Augmenter object.
+
+        Args:
+            cfg (dict): Config dict. It should at least contain the key "type".
+
+        Returns:
+            obj:`iaa.Augmenter`: The constructed imgaug augmenter.
+        """
+        import imgaug.augmenters as iaa
+
+        assert isinstance(cfg, dict) and 'type' in cfg
+        args = cfg.copy()
+
+        obj_type = args.pop('type')
+        if mmcv.is_str(obj_type):
+            obj_cls = getattr(iaa, obj_type)
+        elif issubclass(obj_type, iaa.Augmenter):
+            obj_cls = obj_type
+        else:
+            raise TypeError(
+                f'type must be a str or valid type, but got {type(obj_type)}')
+
+        if 'children' in args:
+            args['children'] = [
+                self.imgaug_builder(child) for child in args['children']
+            ]
+
+        return obj_cls(**args)
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__ + f'(transforms={self.aug})'
+        return repr_str
+
+    def __call__(self, results):
+        assert results['modality'] == 'RGB', 'Imgaug only support RGB images.'
+        in_type = results['imgs'][0].dtype.type
+
+        cur_aug = self.aug.to_deterministic()
+
+        results['imgs'] = [
+            cur_aug.augment_image(frame) for frame in results['imgs']
+        ]
+        img_h, img_w, _ = results['imgs'][0].shape
+
+        out_type = results['imgs'][0].dtype.type
+        assert in_type == out_type, \
+            ('Imgaug input dtype and output dtype are not the same. ',
+             f'Convert from {in_type} to {out_type}')
+
+        if 'gt_bboxes' in results:
+            from imgaug.augmentables import bbs
+            bbox_list = [
+                bbs.BoundingBox(
+                    x1=bbox[0], y1=bbox[1], x2=bbox[2], y2=bbox[3])
+                for bbox in results['gt_bboxes']
+            ]
+            bboxes = bbs.BoundingBoxesOnImage(
+                bbox_list, shape=results['img_shape'])
+            bbox_aug, *_ = cur_aug.augment_bounding_boxes([bboxes])
+            results['gt_bboxes'] = [[
+                max(bbox.x1, 0),
+                max(bbox.y1, 0),
+                min(bbox.x2, img_w),
+                min(bbox.y2, img_h)
+            ] for bbox in bbox_aug.items]
+            if 'proposals' in results:
+                bbox_list = [
+                    bbs.BoundingBox(
+                        x1=bbox[0], y1=bbox[1], x2=bbox[2], y2=bbox[3])
+                    for bbox in results['proposals']
+                ]
+                bboxes = bbs.BoundingBoxesOnImage(
+                    bbox_list, shape=results['img_shape'])
+                bbox_aug, *_ = cur_aug.augment_bounding_boxes([bboxes])
+                results['proposals'] = [[
+                    max(bbox.x1, 0),
+                    max(bbox.y1, 0),
+                    min(bbox.x2, img_w),
+                    min(bbox.y2, img_h)
+                ] for bbox in bbox_aug.items]
+
+        results['img_shape'] = (img_h, img_w)
+
+        return results
+
+
+@PIPELINES.register_module()
 class Fuse:
     """Fuse lazy operations.
 
@@ -152,76 +369,87 @@ class RandomScale:
         return repr_str
 
 
+# Note, entity box transfroms are not added to: ThreeCrop, TenCrop,
+# MultiGroupCrop.
 @PIPELINES.register_module()
 class EntityBoxRescale:
     """Rescale the entity box and proposals according to the image shape.
 
-    Required keys are "img_shape", "scale_factor", "proposals",
-    "ann.entity_boxes", added or modified keys are "ann.entity_boxes". If
-    original "proposals" is not None, "proposals" and "scores" will be added or
-    modified.
+    Required keys are "proposals", "gt_bboxes", added or modified keys are
+    "gt_bboxes". If original "proposals" is not None, "proposals" and
+    will be added or modified.
+
+    Args:
+        scale_factor (np.ndarray): The scale factor used entity_box rescaling.
     """
 
+    def __init__(self, scale_factor):
+        self.scale_factor = scale_factor
+
     def __call__(self, results):
-        img_h, img_w = results['img_shape']
-        scale_factor = results['scale_factor']
-        scale_factor = np.array([
-            scale_factor[0], scale_factor[1], scale_factor[0], scale_factor[1]
-        ])
+        scale_factor = np.concatenate([self.scale_factor, self.scale_factor])
 
         proposals = results['proposals']
-        entity_boxes = results['ann']['entity_boxes']
-        img_scale = np.array([img_w, img_h, img_w, img_h])
-        entity_boxes = (entity_boxes * img_scale).astype(np.float32)
-        results['ann']['entity_boxes'] = entity_boxes * scale_factor
+        gt_bboxes = results['gt_bboxes']
+        results['gt_bboxes'] = gt_bboxes * scale_factor
 
         if proposals is not None:
-            if proposals.shape[1] not in (4, 5):
-                raise AssertionError('proposals shape should be in (n, 4) or '
-                                     f'(n, 5), but got {proposals.shape}')
-            if proposals.shape[1] == 5:
-                scores = proposals[:, 4].astype(np.float32)
-                proposals = proposals[:, :4]
-            else:
-                scores = None
-            proposals = (proposals * img_scale).astype(np.float32)
+            assert proposals.shape[1] == 4, (
+                'proposals shape should be in '
+                f'(n, 4), but got {proposals.shape}')
             results['proposals'] = proposals * scale_factor
-            results['scores'] = scores
 
         return results
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(scale_factor={self.scale_factor})'
 
 
 @PIPELINES.register_module()
 class EntityBoxCrop:
     """Crop the entity boxes and proposals according to the cropped images.
 
-    Required keys are "proposals", "ann.entity_boxes", "crop_bbox", added or
-    modified keys are "ann.entity_boxes". If original "proposals" is not None,
-    "proposals" will be modified.
+    Required keys are "proposals", "gt_bboxes", added or modified keys are
+    "gt_bboxes". If original "proposals" is not None, "proposals" will be
+    modified.
+
+    Args:
+        crop_bbox(np.ndarray | None): The bbox used to crop the original image.
     """
+
+    def __init__(self, crop_bbox):
+        self.crop_bbox = crop_bbox
 
     def __call__(self, results):
         proposals = results['proposals']
-        entity_boxes = results['ann']['entity_boxes']
-        crop_bboxes = results['crop_bbox']
+        gt_bboxes = results['gt_bboxes']
 
-        if crop_bboxes is None:
+        if self.crop_bbox is None:
             return results
-        x1, y1, _, _ = crop_bboxes
 
-        assert entity_boxes.shape[-1] % 4 == 0
-        entity_boxes_ = entity_boxes.copy()
-        entity_boxes_[..., 0::2] = entity_boxes[..., 0::2] - x1
-        entity_boxes_[..., 1::2] = entity_boxes[..., 1::2] - y1
-        results['ann']['entity_boxes'] = entity_boxes_
+        x1, y1, x2, y2 = self.crop_bbox
+        img_w, img_h = x2 - x1, y2 - y1
+
+        assert gt_bboxes.shape[-1] == 4
+        gt_bboxes_ = gt_bboxes.copy()
+        gt_bboxes_[..., 0::2] = np.clip(gt_bboxes[..., 0::2] - x1, 0,
+                                        img_w - 1)
+        gt_bboxes_[..., 1::2] = np.clip(gt_bboxes[..., 1::2] - y1, 0,
+                                        img_h - 1)
+        results['gt_bboxes'] = gt_bboxes_
 
         if proposals is not None:
-            assert proposals.shape[-1] % 4 == 0
+            assert proposals.shape[-1] == 4
             proposals_ = proposals.copy()
-            proposals_[..., 0::2] = proposals[..., 0::2] - x1
-            proposals_[..., 1::2] = proposals[..., 1::2] - y1
+            proposals_[..., 0::2] = np.clip(proposals[..., 0::2] - x1, 0,
+                                            img_w - 1)
+            proposals_[..., 1::2] = np.clip(proposals[..., 1::2] - y1, 0,
+                                            img_h - 1)
             results['proposals'] = proposals_
         return results
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(crop_bbox={self.crop_bbox})'
 
 
 @PIPELINES.register_module()
@@ -230,141 +458,42 @@ class EntityBoxFlip:
 
     Reverse the order of elements in the given bounding boxes and proposals
     with a specific direction. The shape of them are preserved, but the
-    elements are reordered.
-
-    Required keys are "proposals", "img_shape", "ann.entity_boxes", added or
-    modified keys are "flip", "flip_direction", "ann.entity_boxes". If
-    "proposals" is not, it will also be modified.
+    elements are reordered. Only the horizontal flip is supported (seems
+    vertical flipping makes no sense). Required keys are "proposals",
+    "gt_bboxes", added or modified keys are "gt_bboxes". If "proposals"
+    is not None, it will also be modified.
 
     Args:
-        flip_ratio (float): Probability of implementing flip. Default: 0.5.
-        direction (str): Flip imgs horizontally or vertically. Options are
-            "horizontal" | "vertical". Default: "horizontal".
+        img_shape (tuple[int]): The img shape.
     """
 
-    _directions = ['horizontal', 'vertical']
-
-    def __init__(self, flip_ratio=0.5, direction='horizontal'):
-        if direction not in self._directions:
-            raise ValueError(f'Direction {direction} is not supported. '
-                             f'Currently support ones are {self._directions}')
-        self.flip_ratio = flip_ratio
-        self.direction = direction
+    def __init__(self, img_shape):
+        self.img_shape = img_shape
+        assert mmcv.is_tuple_of(img_shape, int)
 
     def __call__(self, results):
-        if np.random.rand() < self.flip_ratio:
-            flip = True
-        else:
-            flip = False
-
-        results['flip'] = flip
-        results['flip_direction'] = self.direction
-
         proposals = results['proposals']
-        entity_boxes = results['ann']['entity_boxes']
-        img_h, img_w = results['img_shape']
+        gt_bboxes = results['gt_bboxes']
+        img_h, img_w = self.img_shape
 
-        if flip:
-            if self.direction == 'horizontal':
-                assert entity_boxes.shape[-1] % 4 == 0
-                entity_boxes_ = entity_boxes.copy()
-                entity_boxes_[..., 0::4] = img_w - entity_boxes[..., 2::4] - 1
-                entity_boxes_[..., 2::4] = img_w - entity_boxes[..., 0::4] - 1
-                if proposals is not None:
-                    assert proposals.shape[-1] % 4 == 0
-                    proposals_ = proposals.copy()
-                    proposals_[..., 0::4] = img_w - proposals[..., 2::4] - 1
-                    proposals_[..., 2::4] = img_w - proposals[..., 0::4] - 1
-                else:
-                    proposals_ = None
-            else:
-                assert entity_boxes.shape[-1] % 4 == 0
-                entity_boxes_ = entity_boxes.copy()
-                entity_boxes_[..., 1::4] = img_h - entity_boxes[..., 3::4] - 1
-                entity_boxes_[..., 3::4] = img_h - entity_boxes[..., 1::4] - 1
-                if proposals is not None:
-                    assert proposals.shape[-1] % 4 == 0
-                    proposals_ = proposals.copy()
-                    proposals_[..., 1::4] = img_h - proposals[..., 3::4] - 1
-                    proposals_[..., 3::4] = img_h - proposals[..., 1::4] - 1
-                else:
-                    proposals_ = None
+        assert gt_bboxes.shape[-1] == 4
+        gt_bboxes_ = gt_bboxes.copy()
+        gt_bboxes_[..., 0::4] = img_w - gt_bboxes[..., 2::4] - 1
+        gt_bboxes_[..., 2::4] = img_w - gt_bboxes[..., 0::4] - 1
+        if proposals is not None:
+            assert proposals.shape[-1] == 4
+            proposals_ = proposals.copy()
+            proposals_[..., 0::4] = img_w - proposals[..., 2::4] - 1
+            proposals_[..., 2::4] = img_w - proposals[..., 0::4] - 1
+        else:
+            proposals_ = None
 
-            results['proposals'] = proposals_
-            results['ann']['entity_boxes'] = entity_boxes_
+        results['proposals'] = proposals_
+        results['gt_bboxes'] = gt_bboxes_
         return results
 
     def __repr__(self):
-        repr_str = (f'{self.__class__.__name__}('
-                    f'flip_ratio={self.flip_ratio}, '
-                    f'direction={self.direction})')
-        return repr_str
-
-
-@PIPELINES.register_module()
-class EntityBoxClip:
-    """Clip (limit) the values in the entity boxes and proposals.
-
-    Required keys are "img_shape", "proposals" and "ann.entity_boxes", added or
-    modified keys are "ann.entity_boxes". If "proposals" is None, it will also
-    be modified.
-    """
-
-    def __call__(self, results):
-        proposals = results['proposals']
-        entity_boxes = results['ann']['entity_boxes']
-        img_h, img_w = results['img_shape']
-
-        entity_boxes[:, 0::2] = np.clip(entity_boxes[:, 0::2], 0, img_w - 1)
-        entity_boxes[:, 1::2] = np.clip(entity_boxes[:, 1::2], 0, img_h - 1)
-        if proposals is not None:
-            proposals[:, 0::2] = np.clip(proposals[:, 0::2], 0, img_w - 1)
-            proposals[:, 1::2] = np.clip(proposals[:, 1::2], 0, img_h - 1)
-
-        results['ann']['entity_boxes'] = entity_boxes
-        results['proposals'] = proposals
-        return results
-
-
-@PIPELINES.register_module()
-class EntityBoxPad:
-    """Pad entity boxes and proposals with zeros.
-
-    Required keys are "proposals" and "ann.entity_boxes", added or modified
-    keys are "ann.entity_boxes". If "proposals" is not None, it is also
-    modified.
-
-    Args:
-        max_num_gts (int | None): maximum of ground truth proposals.
-            Default: None.
-    """
-
-    def __init__(self, max_num_gts=None):
-        self.max_num_gts = max_num_gts
-
-    def __call__(self, results):
-        if self.max_num_gts is None:
-            return results
-
-        proposals = results['proposals']
-        entity_boxes = results['ann']['entity_boxes']
-        num_gts = entity_boxes.shape[0]
-
-        padded_entity_boxes = np.zeros((self.max_num_gts, 4), dtype=np.float32)
-        padded_entity_boxes[:num_gts, :] = entity_boxes
-        if proposals is not None:
-            padded_proposals = np.zeros((self.max_num_gts, 4),
-                                        dtype=np.float32)
-            padded_proposals[:num_gts, :] = proposals
-        else:
-            padded_proposals = None
-
-        results['proposals'] = padded_proposals
-        results['ann']['entity_boxes'] = padded_entity_boxes
-        return results
-
-    def __repr__(self):
-        repr_str = f'{self.__class__.__name__}(max_num_gts={self.max_num_gts})'
+        repr_str = f'{self.__class__.__name__}(img_shape={self.img_shape})'
         return repr_str
 
 
@@ -406,10 +535,30 @@ class RandomCrop:
         if img_w > self.size:
             x_offset = int(np.random.randint(0, img_w - self.size))
 
+        if 'crop_quadruple' not in results:
+            results['crop_quadruple'] = np.array(
+                [0, 0, 1, 1],  # x, y, w, h
+                dtype=np.float32)
+
+        x_ratio, y_ratio = x_offset / img_w, y_offset / img_h
+        w_ratio, h_ratio = self.size / img_w, self.size / img_h
+
+        old_crop_quadruple = results['crop_quadruple']
+        old_x_ratio, old_y_ratio = old_crop_quadruple[0], old_crop_quadruple[1]
+        old_w_ratio, old_h_ratio = old_crop_quadruple[2], old_crop_quadruple[3]
+        new_crop_quadruple = [
+            old_x_ratio + x_ratio * old_w_ratio,
+            old_y_ratio + y_ratio * old_h_ratio, w_ratio * old_w_ratio,
+            h_ratio * old_x_ratio
+        ]
+        results['crop_quadruple'] = np.array(
+            new_crop_quadruple, dtype=np.float32)
+
         new_h, new_w = self.size, self.size
 
         results['crop_bbox'] = np.array(
             [x_offset, y_offset, x_offset + new_w, y_offset + new_h])
+
         results['img_shape'] = (new_h, new_w)
 
         if not self.lazy:
@@ -433,6 +582,12 @@ class RandomCrop:
                                             (lazy_left + right),
                                             (lazy_top + bottom)],
                                            dtype=np.float32)
+
+        # Process entity boxes
+        if 'gt_bboxes' in results:
+            assert not self.lazy
+            entity_box_crop = EntityBoxCrop(results['crop_bbox'])
+            results = entity_box_crop(results)
 
         return results
 
@@ -538,6 +693,25 @@ class RandomResizedCrop:
             (img_h, img_w), self.area_range, self.aspect_ratio_range)
         new_h, new_w = bottom - top, right - left
 
+        if 'crop_quadruple' not in results:
+            results['crop_quadruple'] = np.array(
+                [0, 0, 1, 1],  # x, y, w, h
+                dtype=np.float32)
+
+        x_ratio, y_ratio = left / img_w, top / img_h
+        w_ratio, h_ratio = new_w / img_w, new_h / img_h
+
+        old_crop_quadruple = results['crop_quadruple']
+        old_x_ratio, old_y_ratio = old_crop_quadruple[0], old_crop_quadruple[1]
+        old_w_ratio, old_h_ratio = old_crop_quadruple[2], old_crop_quadruple[3]
+        new_crop_quadruple = [
+            old_x_ratio + x_ratio * old_w_ratio,
+            old_y_ratio + y_ratio * old_h_ratio, w_ratio * old_w_ratio,
+            h_ratio * old_x_ratio
+        ]
+        results['crop_quadruple'] = np.array(
+            new_crop_quadruple, dtype=np.float32)
+
         results['crop_bbox'] = np.array([left, top, right, bottom])
         results['img_shape'] = (new_h, new_w)
 
@@ -562,6 +736,10 @@ class RandomResizedCrop:
                                             (lazy_top + bottom)],
                                            dtype=np.float32)
 
+        if 'gt_bboxes' in results:
+            assert not self.lazy
+            entity_box_crop = EntityBoxCrop(results['crop_bbox'])
+            results = entity_box_crop(results)
         return results
 
     def __repr__(self):
@@ -687,6 +865,25 @@ class MultiScaleCrop:
         results['img_shape'] = (new_h, new_w)
         results['scales'] = self.scales
 
+        if 'crop_quadruple' not in results:
+            results['crop_quadruple'] = np.array(
+                [0, 0, 1, 1],  # x, y, w, h
+                dtype=np.float32)
+
+        x_ratio, y_ratio = x_offset / img_w, y_offset / img_h
+        w_ratio, h_ratio = new_w / img_w, new_h / img_h
+
+        old_crop_quadruple = results['crop_quadruple']
+        old_x_ratio, old_y_ratio = old_crop_quadruple[0], old_crop_quadruple[1]
+        old_w_ratio, old_h_ratio = old_crop_quadruple[2], old_crop_quadruple[3]
+        new_crop_quadruple = [
+            old_x_ratio + x_ratio * old_w_ratio,
+            old_y_ratio + y_ratio * old_h_ratio, w_ratio * old_w_ratio,
+            h_ratio * old_x_ratio
+        ]
+        results['crop_quadruple'] = np.array(
+            new_crop_quadruple, dtype=np.float32)
+
         if not self.lazy:
             results['imgs'] = [
                 img[y_offset:y_offset + new_h, x_offset:x_offset + new_w]
@@ -708,6 +905,11 @@ class MultiScaleCrop:
                                             (lazy_left + right),
                                             (lazy_top + bottom)],
                                            dtype=np.float32)
+
+        if 'gt_bboxes' in results:
+            assert not self.lazy
+            entity_box_crop = EntityBoxCrop(results['crop_bbox'])
+            results = entity_box_crop(results)
 
         return results
 
@@ -805,6 +1007,11 @@ class Resize:
                 raise NotImplementedError('Put Flip at last for now')
             lazyop['interpolation'] = self.interpolation
 
+        if 'gt_bboxes' in results:
+            assert not self.lazy
+            entity_box_rescale = EntityBoxRescale(self.scale_factor)
+            results = entity_box_rescale(results)
+
         return results
 
     def __repr__(self):
@@ -876,7 +1083,9 @@ class Flip:
     The shape of the imgs is preserved, but the elements are reordered.
     Required keys are "imgs", "img_shape", "modality", added or modified
     keys are "imgs", "lazy" and "flip_direction". Required keys in "lazy" is
-    None, added or modified key are "flip" and "flip_direction".
+    None, added or modified key are "flip" and "flip_direction". The Flip
+    augmentation should be placed after any cropping / reshaping augmentations,
+    to make sure crop_quadruple is calculated properly.
 
     Args:
         flip_ratio (float): Probability of implementing flip. Default: 0.5.
@@ -906,10 +1115,7 @@ class Flip:
         if modality == 'Flow':
             assert self.direction == 'horizontal'
 
-        if np.random.rand() < self.flip_ratio:
-            flip = True
-        else:
-            flip = False
+        flip = np.random.rand() < self.flip_ratio
 
         results['flip'] = flip
         results['flip_direction'] = self.direction
@@ -933,6 +1139,11 @@ class Flip:
                 raise NotImplementedError('Use one Flip please')
             lazyop['flip'] = flip
             lazyop['flip_direction'] = self.direction
+
+        if 'gt_bboxes' in results and flip:
+            assert not self.lazy and self.direction == 'horizontal'
+            entity_box_flip = EntityBoxFlip(results['img_shape'])
+            results = entity_box_flip(results)
 
         return results
 
@@ -993,7 +1204,7 @@ class Normalize:
             results['img_norm_cfg'] = dict(
                 mean=self.mean, std=self.std, to_bgr=self.to_bgr)
             return results
-        elif modality == 'Flow':
+        if modality == 'Flow':
             num_imgs = len(results['imgs'])
             assert num_imgs % 2 == 0
             assert self.mean.shape[0] == 2
@@ -1019,8 +1230,7 @@ class Normalize:
                 adjust_magnitude=self.adjust_magnitude)
             results['img_norm_cfg'] = args
             return results
-        else:
-            raise NotImplementedError
+        raise NotImplementedError
 
     def __repr__(self):
         repr_str = (f'{self.__class__.__name__}('
@@ -1254,6 +1464,25 @@ class CenterCrop:
         results['crop_bbox'] = np.array([left, top, right, bottom])
         results['img_shape'] = (new_h, new_w)
 
+        if 'crop_quadruple' not in results:
+            results['crop_quadruple'] = np.array(
+                [0, 0, 1, 1],  # x, y, w, h
+                dtype=np.float32)
+
+        x_ratio, y_ratio = left / img_w, top / img_h
+        w_ratio, h_ratio = new_w / img_w, new_h / img_h
+
+        old_crop_quadruple = results['crop_quadruple']
+        old_x_ratio, old_y_ratio = old_crop_quadruple[0], old_crop_quadruple[1]
+        old_w_ratio, old_h_ratio = old_crop_quadruple[2], old_crop_quadruple[3]
+        new_crop_quadruple = [
+            old_x_ratio + x_ratio * old_w_ratio,
+            old_y_ratio + y_ratio * old_h_ratio, w_ratio * old_w_ratio,
+            h_ratio * old_x_ratio
+        ]
+        results['crop_quadruple'] = np.array(
+            new_crop_quadruple, dtype=np.float32)
+
         if not self.lazy:
             results['imgs'] = [
                 img[top:bottom, left:right] for img in results['imgs']
@@ -1274,6 +1503,11 @@ class CenterCrop:
                                             (lazy_left + right),
                                             (lazy_top + bottom)],
                                            dtype=np.float32)
+
+        if 'gt_bboxes' in results:
+            assert not self.lazy
+            entity_box_crop = EntityBoxCrop(results['crop_bbox'])
+            results = entity_box_crop(results)
 
         return results
 

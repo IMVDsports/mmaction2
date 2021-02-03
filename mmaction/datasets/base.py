@@ -2,7 +2,7 @@ import copy
 import os.path as osp
 import warnings
 from abc import ABCMeta, abstractmethod
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 
 import mmcv
 import numpy as np
@@ -87,7 +87,6 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
     @abstractmethod
     def load_annotations(self):
         """Load the annotation according to ann_file into video_infos."""
-        pass
 
     # json annotations already looks like video_infos, so for each dataset,
     # this func should be the same
@@ -171,7 +170,7 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
             if metric not in allowed_metrics:
                 raise KeyError(f'metric {metric} is not supported')
 
-        eval_results = {}
+        eval_results = OrderedDict()
         gt_labels = [ann['label'] for ann in self.video_infos]
 
         for metric in metrics:
@@ -224,7 +223,8 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
 
         return eval_results
 
-    def dump_results(self, results, out):
+    @staticmethod
+    def dump_results(results, out):
         """Dump data to json/yaml/pickle strings or files."""
         return mmcv.dump(results, out)
 
@@ -241,7 +241,7 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
 
         # prepare tensor in getitem
         # If HVU, type(results['label']) is dict
-        if self.multi_class and type(results['label']) is list:
+        if self.multi_class and isinstance(results['label'], list):
             onehot = torch.zeros(self.num_classes)
             onehot[results['label']] = 1.
             results['label'] = onehot
@@ -261,7 +261,7 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
 
         # prepare tensor in getitem
         # If HVU, type(results['label']) is dict
-        if self.multi_class and type(results['label']) is list:
+        if self.multi_class and isinstance(results['label'], list):
             onehot = torch.zeros(self.num_classes)
             onehot[results['label']] = 1.
             results['label'] = onehot
@@ -276,5 +276,5 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
         """Get the sample for either training or testing given index."""
         if self.test_mode:
             return self.prepare_test_frames(idx)
-        else:
-            return self.prepare_train_frames(idx)
+
+        return self.prepare_train_frames(idx)

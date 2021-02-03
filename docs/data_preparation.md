@@ -6,11 +6,11 @@ We provide some tips for MMAction2 data preparation in this file.
 
 - [Notes on Video Data Format](#notes-on-video-data-format)
 - [Getting Data](#getting-data)
-  * [Prepare videos](#prepare-videos)
-  * [Extract frames](#extract-frames)
-    + [Alternative to denseflow](#alternative-to-denseflow)
-  * [Generate file list](#generate-file-list)
-  * [Prepare audio](#Prepare-audio)
+  - [Prepare videos](#prepare-videos)
+  - [Extract frames](#extract-frames)
+    - [Alternative to denseflow](#alternative-to-denseflow)
+  - [Generate file list](#generate-file-list)
+  - [Prepare audio](#prepare-audio)
 
 <!-- TOC -->
 
@@ -68,6 +68,7 @@ The recommended practice is
 
 1. set `$OUT_FOLDER` to be a folder located in SSD.
 2. symlink the link `$OUT_FOLDER` to `$MMACTION2/data/$DATASET/rawframes`.
+3. set `new-short` instead of using `new-width` and `new-height`.
 
 ```shell
 ln -s ${YOUR_FOLDER} $MMACTION2/data/$DATASET/rawframes

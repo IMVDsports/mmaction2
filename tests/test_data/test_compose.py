@@ -1,12 +1,8 @@
 import numpy as np
 import pytest
+from mmcv.utils import assert_keys_equal
 
 from mmaction.datasets.pipelines import Compose, ImageToTensor
-
-
-def check_keys_equal(result_keys, target_keys):
-    """Check if all elements in target_keys is in result_keys."""
-    return set(target_keys) == set(result_keys)
 
 
 def test_compose():
@@ -14,7 +10,7 @@ def test_compose():
         # transform must be callable or a dict
         Compose('LoadImage')
 
-    target_keys = ['img', 'img_meta']
+    target_keys = ['img', 'img_metas']
 
     # test Compose given a data pipeline
     img = np.random.randn(256, 256, 3)
@@ -25,9 +21,9 @@ def test_compose():
     ]
     compose = Compose(test_pipeline)
     compose_results = compose(results)
-    assert check_keys_equal(compose_results.keys(), target_keys)
-    assert check_keys_equal(compose_results['img_meta'].data.keys(),
-                            ['img_name'])
+    assert assert_keys_equal(compose_results.keys(), target_keys)
+    assert assert_keys_equal(compose_results['img_metas'].data.keys(),
+                             ['img_name'])
 
     # test Compose when forward data is None
     results = None

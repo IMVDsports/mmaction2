@@ -1,6 +1,12 @@
 from ..registry import BACKBONES
 from .resnet3d_slowfast import ResNet3dPathway
 
+try:
+    from mmdet.models.builder import BACKBONES as MMDET_BACKBONES
+    mmdet_imported = True
+except (ImportError, ModuleNotFoundError):
+    mmdet_imported = False
+
 
 @BACKBONES.register_module()
 class ResNet3dSlowOnly(ResNet3dPathway):
@@ -40,3 +46,7 @@ class ResNet3dSlowOnly(ResNet3dPathway):
             **kwargs)
 
         assert not self.lateral
+
+
+if mmdet_imported:
+    MMDET_BACKBONES.register_module()(ResNet3dSlowOnly)
