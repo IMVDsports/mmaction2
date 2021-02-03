@@ -5,7 +5,7 @@ model = dict(
         type='ResNet',
         pretrained='torchvision://resnet50',
         depth=50,
-        # in_channels=10,
+        in_channels=10,
         norm_eval=False),
     cls_head=dict(
         type='TSNHead',
@@ -29,7 +29,7 @@ ann_file_test = f'data/ucf101/ucf101_val_split_{split}_rawframes.txt'
 img_norm_cfg = dict(
     mean=[128, 128], std=[128, 128], to_bgr=False) #TODO what should I set these to?
 train_pipeline = [
-    dict(type='SampleFrames', clip_len=5, frame_interval=1, num_clips=3), # set clip_len 5
+    dict(type='SampleFrames', clip_len=5, frame_interval=1, num_clips=3),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='RandomResizedCrop'),
@@ -73,7 +73,7 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 data = dict(
-    videos_per_gpu=1, # why is the first dimension 3 times this
+    videos_per_gpu=32,
     workers_per_gpu=4,
     train=dict(
         type=dataset_type,
@@ -119,7 +119,7 @@ log_config = dict(
 # runtime settings
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = f'./work_dirs/tsn_r50_1x1x3_2e_ucf101_split_{split}_flow/'
+work_dir = f'./work_dirs/tsn_r50_1x1x3_2e_ucf101_flow/'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
