@@ -1,4 +1,0 @@
-# Default configurations for TSN UCF101 pretrained model
-python tools/test.py work_dirs/tsn_r50_1x1x3_50e_kinetics400_rgb/tsn_r50_1x1x3_50e_kinetics400_rgb_pretrained.py work_dirs/tsn_r50_1x1x3_50e_kinetics400_rgb/latest.pth --eval top_k_accuracy --out kinetics1_latest.json > kinetics1_latest.txt
-python tools/test.py work_dirs/tsn_r50_1x1x3_50e_kinetics400_rgb_lr=0.000625/tsn_r50_1x1x3_50e_kinetics400_rgb_pretrained.py work_dirs/tsn_r50_1x1x3_50e_kinetics400_rgb_lr=0.000625/epoch_15.pth --eval top_k_accuracy --out kinetics625_15.json > kinetics625_15.txt
-python tools/test.py work_dirs/tsn_r50_1x1x3_50e_kinetics400_rgb_lr=0.000625/tsn_r50_1x1x3_50e_kinetics400_rgb_pretrained.py work_dirs/tsn_r50_1x1x3_50e_kinetics400_rgb_lr=0.000625/latest.pth --eval top_k_accuracy --out kinetics625_latest.json > kinetics625_latest.txt
