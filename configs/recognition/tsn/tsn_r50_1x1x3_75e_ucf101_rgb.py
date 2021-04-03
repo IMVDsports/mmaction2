@@ -8,7 +8,7 @@ dataset_type = 'RawframeDataset'
 data_root = 'data/ucf101/rawframes/'
 data_root_val = 'data/ucf101/rawframes/'
 split = 1  # official train/test splits. valid numbers: 1, 2, 3
-ann_file_train = f'data/ucf101/ucf101_train_split_{split}_rawframes.txt'
+ann_file_train = f'data/ucf101/ucf101_train_split_{split}_flow.txt'
 ann_file_val = f'data/ucf101/ucf101_val_split_{split}_rawframes.txt'
 ann_file_test = f'data/ucf101/ucf101_val_split_{split}_rawframes.txt'
 img_norm_cfg = dict(
@@ -92,4 +92,4 @@ total_epochs = 75
 
 # runtime settings
 checkpoint_config = dict(interval=5)
-work_dir = f'./work_dirs/tsn_r50_1x1x3_75e_ucf101_split_{split}_rgb/'
+work_dir = f'./work_dirs/tsn_r50_1x1x3_75e_ucf101_rgb/'
