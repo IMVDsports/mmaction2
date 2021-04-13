@@ -93,7 +93,7 @@ class RawframeDataset(BaseDataset):
                  with_offset=False,
                  multi_class=False,
                  num_classes=None,
-                 start_index=1,
+                 start_index=0,
                  modality='RGB',
                  sample_by_class=False,
                  power=None):
@@ -131,10 +131,14 @@ class RawframeDataset(BaseDataset):
                     # idx for offset and total_frames
                     video_info['offset'] = int(line_split[idx])
                     video_info['total_frames'] = int(line_split[idx + 1])
+                    if self.modality=='Flow':
+                        video_info['total_frames'] -=1
                     idx += 2
                 else:
                     # idx for total_frames
                     video_info['total_frames'] = int(line_split[idx])
+                    if self.modality=='Flow':
+                        video_info['total_frames'] -=1
                     idx += 1
                 # idx for label[s]
                 label = [int(x) for x in line_split[idx:]]
