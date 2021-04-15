@@ -1,7 +1,7 @@
 _base_ = ['../../_base_/models/tsn_r50.py', '../../_base_/default_runtime.py']
 
 # model settings
-model = dict(cls_head=dict(num_classes=4, init_std=0.001))
+model = dict(cls_head=dict(num_classes=5, init_std=0.001))
 
 # dataset settings
 dataset_type = 'RawframeDataset'
@@ -17,7 +17,6 @@ train_pipeline = [
     dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(type='RandomResizedCrop'),
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0.5),
     dict(type='Normalize', **img_norm_cfg),
@@ -34,7 +33,7 @@ val_pipeline = [
         test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(type='CenterCrop', crop_size=256),
+    dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
@@ -50,7 +49,7 @@ test_pipeline = [
         test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(type='ThreeCrop', crop_size=256),
+    dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
@@ -88,8 +87,9 @@ optimizer = dict(
 optimizer_config = dict(grad_clip=dict(max_norm=40, norm_type=2))
 # learning policy
 lr_config = dict(policy='step', step=[])
-total_epochs = 50
+total_epochs = 30
 
 # runtime settings
 checkpoint_config = dict(interval=5)
-work_dir = f'./work_dirs/YMJA/tsn_r50_1x1x3_30e_rgb/'
+# work_dir = f'./work_dirs/YMJA/tsn_r50_1x1x3_30e_rgb/'
+work_dir = f'./work_dirs/YMJA/rand/tsn_rgb/'

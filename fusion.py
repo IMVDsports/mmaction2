@@ -7,6 +7,11 @@ import numpy as np
 import sys
 import json
 from mmaction.datasets import build_dataset
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
+import seaborn as sns
+
+import pandas as pd
+import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser(description='Multi-stream Fusion')
 parser.add_argument('n_streams', metavar='N', type=int, help='number of streams')
@@ -20,9 +25,9 @@ if args.n_streams != len(args.paths):
     sys.exit()
 
 if args.weights and args.n_streams != len(args.weights):
-    print("Input error: Number of wights doesn't match number of streams.")
+    print("Input error: Number of weights doesn't match number of streams.")
     sys.exit()
-
+          
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
     e_x = np.exp(x - np.max(x))
@@ -56,7 +61,7 @@ fusion = np.average(streams, axis=0, weights=weights)
 # Assumption: Use UCF101 dataset only
 # TODO pass an input the annotation file used by both models
 # Get the labels
-annotation_file = 'data/ucf101/ucf101_val_split_1_rawframes.txt'
+annotation_file = 'data/YMJA/ymja_test_ben_split.txt' #'data/ucf101/ucf101_val_split_1_rawframes.txt'
 labels = []
 
 with open(annotation_file) as f:
@@ -71,6 +76,36 @@ if len(labels) != len(preds):
 
 # TODO Can add confusion matrix or other
 # Calculate accuracies
-# Top 1 accuracy
 
 print('Top 1 accuracy', np.sum(labels == preds)/len(labels))
+
+# micro: Calculate metrics globally by counting the total true positives, false negatives and false positives.
+# macro: Calculate metrics for each label, and find their unweighted mean. This does not take label imbalance into account.
+# Micro-averaging better when suspect class imbalance
+print('Precision (weighted)', precision_score(labels, preds, average='weighted'))
+print('Recall (weighted)', recall_score(labels, preds, average='weighted'))
+print('F1 Score (weighted)', f1_score(labels, preds, average='weighted'))
+
+print(classification_report(labels, preds))
+
+# Confusion matrix
+# cf_matrix = confusion_matrix(labels, preds)
+categories = ['No Penalty', 'Tripping', 'Hooking', 'Slashing', 'Holding']
+# sns_plot = sns.heatmap(cf_matrix, annot=True, xticklabels=categories, yticklabels=categories)
+# sns_plot.figure.savefig("cm.png")
+
+# Report style confusion matrix
+matrixConfusion = confusion_matrix(labels, preds)
+df_cm = pd.DataFrame(matrixConfusion, categories, categories)
+plt.figure(figsize=(3,3))
+# sn.set(font_scale=1.6) # for label size
+g = sns.heatmap(df_cm, annot=True,  cmap='coolwarm') # font size
+g.set_yticklabels(categories, rotation=90)
+plt.yticks(rotation=0)
+plt.ylabel("True Values")
+plt.xlabel("Predicted Values")
+plt.xticks(rotation=45, ha='right')
+g.figure.tight_layout()
+plt.savefig("best_cm.png", dpi=750)
+plt.subplots_adjust(left=.8)
+plt.show()

@@ -9,7 +9,7 @@ model = dict(
         norm_eval=False),
     cls_head=dict(
         type='TSNHead',
-        num_classes=4,
+        num_classes=5,
         in_channels=2048,
         spatial_type='avg',
         consensus=dict(type='AvgConsensus', dim=1),
@@ -32,12 +32,6 @@ train_pipeline = [
     dict(type='SampleFrames', clip_len=5, frame_interval=1, num_clips=8), # num_clip number of segments, clip_len length of a frame
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(
-        type='MultiScaleCrop',
-        input_size=224,
-        scales=(1, 0.875, 0.75, 0.66),
-        random_crop=False,
-        max_wh_scale_gap=1),
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0.5),
     dict(type='Normalize', **img_norm_cfg),
@@ -54,7 +48,7 @@ val_pipeline = [
         test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(type='CenterCrop', crop_size=224),
+    dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW_Flow'),
@@ -70,7 +64,7 @@ test_pipeline = [
         test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(type='TenCrop', crop_size=224),
+    dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW_Flow'),
@@ -106,12 +100,12 @@ data = dict(
         start_index=0))
 # optimizer
 optimizer = dict(
-    type='SGD', lr=0.005, momentum=0.9,
+    type='SGD', lr=0.001, momentum=0.9,
     weight_decay=0.0001)  # this lr is used for 8 gpus
 optimizer_config = dict(grad_clip=dict(max_norm=40, norm_type=2))
 # learning policy
-lr_config = dict(policy='step', step=[15, 30, 45])
-total_epochs = 60
+lr_config = dict(policy='step', step=[10, 20])
+total_epochs = 25
 checkpoint_config = dict(interval=5)
 evaluation = dict(
     interval=5, metrics=['top_k_accuracy', 'mean_class_accuracy'])
@@ -124,7 +118,8 @@ log_config = dict(
 # runtime settings
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/YMJA/tsn_r50_1x1x3_40e_kinetics400_flow/'
+# work_dir = './work_dirs/YMJA/tsn_r50_1x1x3_40e_kinetics400_flow/'
+work_dir = './work_dirs/YMJA/rand/tsn_kinetics400_flow/'
 load_from = 'https://download.openmmlab.com/mmaction/recognition/tsn/tsn_r50_1x1x3_100e_kinetics400_rgb/tsn_r50_1x1x3_100e_kinetics400_rgb_20200614-e508be42.pth'
 resume_from = None
 workflow = [('train', 1)]
